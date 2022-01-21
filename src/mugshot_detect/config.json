@@ -1,0 +1,6 @@
+{
+  "user": "<user name>",
+  "password": "<password>",
+  "host": "<FQDN>",
+  "database": "<database name>"
+}
