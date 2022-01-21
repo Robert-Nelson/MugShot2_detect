@@ -3,6 +3,7 @@
 # Copyright (c) 2020 Robert Nelson, All rights reserved.
 
 import os.path
+import sys
 import time
 from glob import glob
 from deepface.detectors import FaceDetector
@@ -182,124 +183,129 @@ def rect_area(rect1, rect2):
         return 0
 
 
-prog_desc = ""
-help_epilog = ""
-remote_exec_description = ""
+def main():
+    prog_desc = ""
+    help_epilog = ""
+    remote_exec_description = ""
 
-parser = argparse.ArgumentParser(description=prog_desc, epilog=help_epilog, )
-parser.add_argument("--config", "-c", type=str, nargs=1, required=True, metavar="CONFIG.JSON")
-remote_exec_group = parser.add_argument_group(title="Optional Remote Execution", description=remote_exec_description)
-remote_exec_group.add_argument("--training", "-t", type=str, nargs=1)
-remote_exec_group.add_argument("--uploads", "-u", type=str, nargs=1)
+    parser = argparse.ArgumentParser(description=prog_desc, epilog=help_epilog, )
+    parser.add_argument("--config", "-c", type=str, nargs=1, required=True, metavar="CONFIG.JSON")
+    remote_exec_group = parser.add_argument_group(title="Optional Remote Execution",
+                                                  description=remote_exec_description)
+    remote_exec_group.add_argument("--training", "-t", type=str, nargs=1)
+    remote_exec_group.add_argument("--uploads", "-u", type=str, nargs=1)
 
-input_list_group = parser.add_mutually_exclusive_group(required=True)
-input_list_group.add_argument("--files", "-f", type=str, nargs='+')
-input_list_group.add_argument("--images", "-i", type=int, nargs=2, metavar=('START_IMAGE_#', 'END_IMAGE_#'))
-input_list_group.add_argument("--dates", "-d", type=str, nargs=2, metavar=('START_DATE', 'END_DATE'))
+    input_list_group = parser.add_mutually_exclusive_group(required=True)
+    input_list_group.add_argument("--files", "-f", type=str, nargs='+')
+    input_list_group.add_argument("--images", "-i", type=int, nargs=2, metavar=('START_IMAGE_#', 'END_IMAGE_#'))
+    input_list_group.add_argument("--dates", "-d", type=str, nargs=2, metavar=('START_DATE', 'END_DATE'))
 
-args = parser.parse_args()
+    args = parser.parse_args()
 
-with open(args.config[0], "r") as fp:
-    config = json.load(fp)
+    with open(args.config[0], "r") as fp:
+        config = json.load(fp)
 
-if args.training[0] is not None:
-    training_dir = args.training[0]
-else:
-    training_dir = './plugins/MugShot/training'
+    if args.training[0] is not None:
+        training_dir = args.training[0]
+    else:
+        training_dir = './plugins/MugShot/training'
 
-if args.uploads[0] is not None:
-    uploads_dir = args.uploads[0]
-else:
-    uploads_dir = './upload/'
+    if args.uploads[0] is not None:
+        uploads_dir = args.uploads[0]
+    else:
+        uploads_dir = './upload/'
 
-# set opencv, ssd, dlib, mtcnn or retinaface
-detector_name = "retinaface"
-# detector_name = "mtcnn"
-detector = FaceDetector.build_model(detector_name)
+    # set opencv, ssd, dlib, mtcnn or retinaface
+    detector_name = "retinaface"
+    # detector_name = "mtcnn"
+    detector = FaceDetector.build_model(detector_name)
 
-conn = db_open(user=config["user"], password=config["password"], host=config["host"], database=config["database"])
+    conn = db_open(user=config["user"], password=config["password"], host=config["host"], database=config["database"])
 
-unknown_base_tag_id = db_get_unidentified_tag_id(conn)
+    unknown_base_tag_id = db_get_unidentified_tag_id(conn)
 
-if args.images is not None:
-    print("[INFO] Processing images from ", args.images[0], "to ", args.images[1])
-    filelist = db_get_files_by_image(conn, args.images[0], args.images[1])
-elif args.dates is not None:
-    print("[INFO] Processing dates from", args.dates[0], "to", args.dates[1])
-    filelist = db_get_files_by_date(conn, args.dates[0], args.dates[1])
-elif args.files is not None:
-    filelist = args.files
-else:
-    filelist = []
+    if args.images is not None:
+        print("[INFO] Processing images from ", args.images[0], "to ", args.images[1])
+        filelist = db_get_files_by_image(conn, args.images[0], args.images[1])
+    elif args.dates is not None:
+        print("[INFO] Processing dates from", args.dates[0], "to", args.dates[1])
+        filelist = db_get_files_by_date(conn, args.dates[0], args.dates[1])
+    elif args.files is not None:
+        filelist = args.files
+    else:
+        filelist = []
 
-print("[INFO]", len(filelist), "files")
+    print("[INFO]", len(filelist), "files")
 
-orig_dir = os.getcwd()
-os.chdir(uploads_dir)
+    orig_dir = os.getcwd()
+    os.chdir(uploads_dir)
 
-for file_pattern in filelist:
-    file_pattern = file_pattern.replace('./upload/', '')
-    for img_basename in glob(file_pattern):
-        unknown_id = 0
-        print("[INFO] Processing ", img_basename)
-        image_id = db_get_image_id(conn, './upload/' + img_basename)
-        if image_id > 0:
-            img = cv2.imread(img_basename)
+    for file_pattern in filelist:
+        file_pattern = file_pattern.replace('./upload/', '')
+        for img_basename in glob(file_pattern):
+            unknown_id = 0
+            print("[INFO] Processing ", img_basename)
+            image_id = db_get_image_id(conn, './upload/' + img_basename)
+            if image_id > 0:
+                img = cv2.imread(img_basename)
 
-            start = time.time()
-            detected_faces = FaceDetector.detect_faces(detector, detector_name, img)
-            end = time.time()
+                start = time.time()
+                detected_faces = FaceDetector.detect_faces(detector, detector_name, img)
+                end = time.time()
 
-            print("[INFO] face detection took {:.4f} seconds".format(end - start))
-            print("[INFO] there are ", len(detected_faces), " faces")
+                print("[INFO] face detection took {:.4f} seconds".format(end - start))
+                print("[INFO] there are ", len(detected_faces), " faces")
 
-            faces = db_fetchfaces(conn, image_id)
+                faces = db_fetchfaces(conn, image_id)
 
-            new_faces = []
-            updated_faces = []
+                new_faces = []
+                updated_faces = []
 
-            for detected in detected_faces:
-                detected_bbox = detected[1]
-                db_facepos = {
-                    'image_id': image_id, 'tag_id': None, 'top': int(detected_bbox[1]), 'lft': int(detected_bbox[0]),
-                    'width': int(detected_bbox[2]), 'height': int(detected_bbox[3]), 'image_width': int(img.shape[1]),
-                    'image_height': int(img.shape[0])
-                }
+                for detected in detected_faces:
+                    detected_bbox = detected[1]
+                    db_facepos = {
+                        'image_id': image_id, 'tag_id': None, 'top': int(detected_bbox[1]),
+                        'lft': int(detected_bbox[0]), 'width': int(detected_bbox[2]), 'height': int(detected_bbox[3]),
+                        'image_width': int(img.shape[1]), 'image_height': int(img.shape[0])
+                    }
 
-                if len(faces) > 0:
-                    r1 = (detected_bbox[0], detected_bbox[1],
-                          int(detected_bbox[0] + detected_bbox[2]), int(detected_bbox[1] + detected_bbox[3]))
+                    if len(faces) > 0:
+                        r1 = (detected_bbox[0], detected_bbox[1],
+                              int(detected_bbox[0] + detected_bbox[2]), int(detected_bbox[1] + detected_bbox[3]))
 
-                    for previous in faces:
-                        scale_factor = float(img.shape[1]) / float(previous.image_width)
+                        for previous in faces:
+                            scale_factor = float(img.shape[1]) / float(previous.image_width)
 
-                        r2 = (previous.lft * scale_factor, previous.top * scale_factor,
-                              (previous.lft+previous.width) * scale_factor,
-                              (previous.top+previous.height) * scale_factor)
+                            r2 = (previous.lft * scale_factor, previous.top * scale_factor,
+                                  (previous.lft+previous.width) * scale_factor,
+                                  (previous.top+previous.height) * scale_factor)
 
-                        area = rect_area(r1, r2)
-                        percentage = float(area) / (float(detected_bbox[2]) * float(detected_bbox[3])) * 100.0
+                            area = rect_area(r1, r2)
+                            percentage = float(area) / (float(detected_bbox[2]) * float(detected_bbox[3])) * 100.0
 
-                        if percentage > 75:
-                            db_facepos['tag_id'] = int(previous.tag_id)
-                            break
+                            if percentage > 75:
+                                db_facepos['tag_id'] = int(previous.tag_id)
+                                break
 
-                if db_facepos['tag_id'] is None:
-                    db_facepos['tag_id'] = unknown_base_tag_id + unknown_id
-                    unknown_id = unknown_id + 1
-                    new_faces.append(db_facepos)
-                else:
-                    updated_faces.append(db_facepos)
+                    if db_facepos['tag_id'] is None:
+                        db_facepos['tag_id'] = unknown_base_tag_id + unknown_id
+                        unknown_id = unknown_id + 1
+                        new_faces.append(db_facepos)
+                    else:
+                        updated_faces.append(db_facepos)
 
-                url_name = db_get_url_name(conn, db_facepos['tag_id'])
-                file_name = os.path.join(training_dir, url_name, str(image_id) + str(db_facepos['tag_id']) + '.jpg')
-                directory = os.path.dirname(file_name)
-                if not os.path.exists(directory):
-                    os.makedirs(directory)
-                cv2.imwrite(file_name, detected[0])
+                    url_name = db_get_url_name(conn, db_facepos['tag_id'])
+                    file_name = os.path.join(training_dir, url_name, str(image_id) + str(db_facepos['tag_id']) + '.jpg')
+                    directory = os.path.dirname(file_name)
+                    if not os.path.exists(directory):
+                        os.makedirs(directory)
+                    cv2.imwrite(file_name, detected[0])
 
-            db_setfacepos(conn, new_faces, updated_faces)
-        else:
-            print("WARNING: ", img_filename, "hasn't been added or has been removed - skipping")
+                db_setfacepos(conn, new_faces, updated_faces)
+            else:
+                print("WARNING: ", img_filename, "hasn't been added or has been removed - skipping")
 
-db_close(conn)
+    db_close(conn)
+
+if __name__ == '__main__':
+    sys.exit(main())
