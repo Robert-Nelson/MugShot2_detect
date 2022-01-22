@@ -59,44 +59,43 @@ def db_get_files_by_date(db_conn, start_image, end_image):
     return result
 
 
-def db_get_unidentified_tag_id(db_conn):
+def db_get_unidentified_tag_ids(db_conn, count):
     db_cur = db_conn.cursor()
-    unknown_id = None
+    unknown_ids = []
     try:
-        db_cur.execute("SELECT id FROM piwigo_tags WHERE name = 'Unidentified Person'")
+        db_cur.execute("SELECT id FROM piwigo_tags WHERE name LIKE 'Unidentified Person%' ORDER BY id")
         rows = db_cur.fetchall()
         if len(rows) > 0:
-            unknown_id = int(rows[0][0])
+            for row in rows:
+                unknown_ids.append(int(row[0]))
     except mysql.Error as error:
-        print("Error while getting the Unidentified Person tag", error)
+        print("Error while getting the Unidentified Person tag list", error)
 
-    if unknown_id is None:
-        try:
-            dummy_tags = [
-                ('Unidentified Person', 'unidentified_person'),
-                ('Unidentified Person #2', 'unidentified_person_#2'),
-                ('Unidentified Person #3', 'unidentified_person_#3'),
-                ('Unidentified Person #4', 'unidentified_person_#4'),
-                ('Unidentified Person #5', 'unidentified_person_#5'),
-                ('Unidentified Person #6', 'unidentified_person_#6'),
-                ('Unidentified Person #7', 'unidentified_person_#7'),
-                ('Unidentified Person #8', 'unidentified_person_#8'),
-                ('Unidentified Person #9', 'unidentified_person_#9'),
-                ('Unidentified Person #10', 'unidentified_person_#10')
-            ]
-            sql_insert = (
-                "INSERT INTO piwigo_tags (name, url_name, lastmodified)"
-                "VALUES (%s, %s, NOW())"
-            )
-            db_cur.execute(sql_insert, dummy_tags[0])
-            unknown_id = db_cur.lastrowid
-            db_cur.executemany(sql_insert, dummy_tags[1:])
-        except mysql.Error as error:
-            print("Error while inserting Unidentified Person tags", error)
+    if len(unknown_ids) >= count:
+        db_cur.close()
+
+        return unknown_ids
+
+    dummy_tags = []
+    count = int((count + 4) / 5) * 5
+
+    name = "Unidentified Person #"
+    url = "unidentified_person_#"
+    for index in range(len(unknown_ids)+1, count+1):
+        dummy_tags.append((name + str(index), url + str(index)),)
+
+    try:
+        sql_insert = (
+            "INSERT INTO piwigo_tags (name, url_name, lastmodified)"
+            "VALUES (%s, %s, NOW())"
+        )
+        db_cur.executemany(sql_insert, dummy_tags)
+    except mysql.Error as error:
+        print("Error while inserting Unidentified Person tags", error)
 
     db_cur.close()
 
-    return unknown_id
+    return db_get_unidentified_tag_ids(db_conn, count)
 
 
 def db_get_image_id(db_conn, filename):
@@ -222,8 +221,6 @@ def main():
 
     conn = db_open(user=config["user"], password=config["password"], host=config["host"], database=config["database"])
 
-    unknown_base_tag_id = db_get_unidentified_tag_id(conn)
-
     if args.images is not None:
         print("[INFO] Processing images from ", args.images[0], "to ", args.images[1])
         filelist = db_get_files_by_image(conn, args.images[0], args.images[1])
@@ -243,7 +240,6 @@ def main():
     for file_pattern in filelist:
         file_pattern = file_pattern.replace('./upload/', '')
         for img_basename in glob(file_pattern):
-            unknown_id = 0
             print("[INFO] Processing ", img_basename)
             image_id = db_get_image_id(conn, './upload/' + img_basename)
             if image_id > 0:
@@ -258,9 +254,9 @@ def main():
 
                 faces = db_fetchfaces(conn, image_id)
 
-                new_faces = []
-                updated_faces = []
+                unknown_ids = db_get_unidentified_tag_ids(conn, len(detected_faces))
 
+                faces_list = []
                 for detected in detected_faces:
                     detected_bbox = detected[1]
                     db_facepos = {
@@ -285,11 +281,20 @@ def main():
 
                             if percentage > 75:
                                 db_facepos['tag_id'] = int(previous.tag_id)
+                                try:
+                                    unknown_ids.remove(int(previous.tag_id))
+                                except ValueError:
+                                    pass
                                 break
 
+                    faces_list.append((db_facepos, detected[0]))
+
+                new_faces = []
+                updated_faces = []
+
+                for db_facepos, faceimg in faces_list:
                     if db_facepos['tag_id'] is None:
-                        db_facepos['tag_id'] = unknown_base_tag_id + unknown_id
-                        unknown_id = unknown_id + 1
+                        db_facepos['tag_id'] = unknown_ids.pop(0)
                         new_faces.append(db_facepos)
                     else:
                         updated_faces.append(db_facepos)
@@ -299,13 +304,14 @@ def main():
                     directory = os.path.dirname(file_name)
                     if not os.path.exists(directory):
                         os.makedirs(directory)
-                    cv2.imwrite(file_name, detected[0])
+                    cv2.imwrite(file_name, faceimg)
 
                 db_setfacepos(conn, new_faces, updated_faces)
             else:
                 print("WARNING: ", img_filename, "hasn't been added or has been removed - skipping")
 
     db_close(conn)
+
 
 if __name__ == '__main__':
     sys.exit(main())
